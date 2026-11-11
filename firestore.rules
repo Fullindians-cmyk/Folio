@@ -1,0 +1,260 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+$');
+    }
+
+    // Validation Blueprint: Transaction
+    function isValidTransaction(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'instrument_type', 'transaction_type',
+          'symbol', 'name', 'quantity', 'price', 'date', 'exchange',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'instrument_type', 'transaction_type',
+          'symbol', 'name', 'quantity', 'price', 'date', 'exchange',
+          'target_lot_id', 'createdAt', 'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        data.instrument_type is string && data.instrument_type.size() <= 20 && (data.instrument_type == 'stock' || data.instrument_type == 'mutual_fund') &&
+        data.transaction_type is string && data.transaction_type.size() <= 10 && (data.transaction_type == 'buy' || data.transaction_type == 'sell') &&
+        data.symbol is string && data.symbol.size() >= 1 && data.symbol.size() <= 32 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.quantity is number && data.quantity > 0 &&
+        data.price is number && data.price > 0 &&
+        data.date is string && data.date.size() <= 16 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.exchange is string && data.exchange.size() <= 10 && (data.exchange == 'NSE' || data.exchange == 'BSE' || data.exchange == 'N/A') &&
+        (!('target_lot_id' in data) || (data.target_lot_id is string && data.target_lot_id.size() <= 64)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: InstrumentPrice
+    function isValidInstrumentPrice(data) {
+      return data.keys().hasAll([
+          'symbol', 'ownerId', 'instrument_type', 'name', 'exchange',
+          'latest_price', 'previous_close', 'last_updated', 'source',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'symbol', 'ownerId', 'instrument_type', 'name', 'exchange',
+          'latest_price', 'previous_close', 'high_52w', 'low_52w',
+          'last_updated', 'source', 'createdAt', 'updatedAt'
+        ]) &&
+        data.symbol is string && data.symbol.size() >= 1 && data.symbol.size() <= 32 &&
+        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        data.instrument_type is string && data.instrument_type.size() <= 20 && (data.instrument_type == 'stock' || data.instrument_type == 'mutual_fund') &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.exchange is string && data.exchange.size() <= 10 && (data.exchange == 'NSE' || data.exchange == 'BSE' || data.exchange == 'N/A') &&
+        data.latest_price is number && data.latest_price > 0 &&
+        data.previous_close is number && data.previous_close > 0 &&
+        (!('high_52w' in data) || (data.high_52w is number && data.high_52w >= 0)) &&
+        (!('low_52w' in data) || (data.low_52w is number && data.low_52w >= 0)) &&
+        data.last_updated is string && data.last_updated.size() <= 40 &&
+        data.source is string && data.source.size() <= 32 && (data.source == 'yahoo_live' || data.source == 'mfapi_live' || data.source == 'cached_fallback') &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: DailySnapshot
+    function isValidDailySnapshot(data) {
+      return data.keys().hasAll([
+          'date', 'ownerId', 'prices', 'portfolio_total_value', 'timestamp',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'date', 'ownerId', 'prices', 'portfolio_total_value', 'timestamp',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.date is string && data.date.size() <= 16 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        data.prices is map && data.prices.keys().size() <= 100 &&
+        data.portfolio_total_value is number && data.portfolio_total_value >= 0 &&
+        data.timestamp is string && data.timestamp.size() <= 40 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Goal
+    function isValidGoal(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'name', 'mode', 'target_amount',
+          'accumulated_amount', 'created_date', 'last_trailing_1y_return_pct',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'name', 'mode', 'target_amount',
+          'accumulated_amount', 'created_date', 'target_date',
+          'initial_required_sip', 'current_required_sip', 'monthly_sip',
+          'initial_target_date', 'current_target_date', 'current_months_to_target',
+          'last_trailing_1y_return_pct', 'createdAt', 'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.mode is string && data.mode.size() <= 4 && (data.mode == 'A' || data.mode == 'B') &&
+        data.target_amount is number && data.target_amount > 0 &&
+        data.accumulated_amount is number && data.accumulated_amount >= 0 &&
+        data.created_date is string && data.created_date.size() <= 16 && data.created_date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        (!('target_date' in data) || (data.target_date is string && data.target_date.size() <= 16)) &&
+        (!('initial_required_sip' in data) || (data.initial_required_sip is number && data.initial_required_sip >= 0)) &&
+        (!('current_required_sip' in data) || (data.current_required_sip is number && data.current_required_sip >= 0)) &&
+        (!('monthly_sip' in data) || (data.monthly_sip is number && data.monthly_sip >= 0)) &&
+        (!('initial_target_date' in data) || (data.initial_target_date is string && data.initial_target_date.size() <= 16)) &&
+        (!('current_target_date' in data) || (data.current_target_date is string && data.current_target_date.size() <= 16)) &&
+        (!('current_months_to_target' in data) || (data.current_months_to_target is number && data.current_months_to_target >= 0)) &&
+        data.last_trailing_1y_return_pct is number &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: GoalRecalc
+    function isValidGoalRecalc(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'goal_id', 'recalc_date',
+          'trailing_1y_return_pct', 'accumulated_amount',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'goal_id', 'recalc_date',
+          'trailing_1y_return_pct', 'accumulated_amount',
+          'adjusted_monthly_sip', 'adjusted_target_date',
+          'adjusted_months_remaining', 'note',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        data.goal_id is string && data.goal_id.size() >= 1 && data.goal_id.size() <= 64 && data.goal_id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.recalc_date is string && data.recalc_date.size() <= 16 && data.recalc_date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+        data.trailing_1y_return_pct is number &&
+        data.accumulated_amount is number && data.accumulated_amount >= 0 &&
+        (!('adjusted_monthly_sip' in data) || (data.adjusted_monthly_sip is number && data.adjusted_monthly_sip >= 0)) &&
+        (!('adjusted_target_date' in data) || (data.adjusted_target_date is string && data.adjusted_target_date.size() <= 16)) &&
+        (!('adjusted_months_remaining' in data) || (data.adjusted_months_remaining is number && data.adjusted_months_remaining >= 0)) &&
+        (!('note' in data) || (data.note is string && data.note.size() <= 200)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 1. /transactions/{transactionId}
+    match /transactions/{transactionId} {
+      allow get: if isSignedIn() && isValidId(transactionId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'price', 'date', 'name', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(transactionId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 2. /instruments/{instrumentId}
+    match /instruments/{instrumentId} {
+      allow get: if isSignedIn() && isValidId(instrumentId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().symbol == existing().symbol &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'latest_price', 'previous_close', 'high_52w', 'low_52w', 'last_updated', 'source', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(instrumentId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 3. /snapshots/{snapshotId}
+    match /snapshots/{snapshotId} {
+      allow get: if isSignedIn() && isValidId(snapshotId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().date == existing().date &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'prices', 'portfolio_total_value', 'timestamp', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(snapshotId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 4. /goals/{goalId}
+    match /goals/{goalId} {
+      allow get: if isSignedIn() && isValidId(goalId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(goalId) && isValidGoal(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(goalId) && isValidGoal(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'target_amount', 'accumulated_amount', 'target_date',
+          'current_required_sip', 'monthly_sip', 'current_target_date',
+          'current_months_to_target', 'last_trailing_1y_return_pct', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(goalId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 5. /goal_recalcs/{recalcId}
+    match /goal_recalcs/{recalcId} {
+      allow get: if isSignedIn() && isValidId(recalcId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
+        (
+          (exists(/databases/$(database)/documents/goals/$(incoming().goal_id)) &&
+           get(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId == request.auth.uid) ||
+          (existsAfter(/databases/$(database)/documents/goals/$(incoming().goal_id)) &&
+           getAfter(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId == request.auth.uid)
+        );
+      allow update: if isSignedIn() && isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().id == existing().id &&
+        incoming().goal_id == existing().goal_id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'trailing_1y_return_pct', 'accumulated_amount',
+          'adjusted_monthly_sip', 'adjusted_target_date',
+          'adjusted_months_remaining', 'note', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(recalcId) && existing().ownerId == request.auth.uid;
+    }
+  }
+}

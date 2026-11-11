@@ -1,0 +1,373 @@
+{
+  "entities": {
+    "Transaction": {
+      "title": "Transaction",
+      "description": "A stock or mutual fund buy or sell transaction lot belonging to a user.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "instrument_type": {
+          "type": "string",
+          "enum": ["stock", "mutual_fund"],
+          "maxLength": 20
+        },
+        "transaction_type": {
+          "type": "string",
+          "enum": ["buy", "sell"],
+          "maxLength": 10
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "price": {
+          "type": "number"
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "exchange": {
+          "type": "string",
+          "enum": ["NSE", "BSE", "N/A"],
+          "maxLength": 10
+        },
+        "target_lot_id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "instrument_type",
+        "transaction_type",
+        "symbol",
+        "name",
+        "quantity",
+        "price",
+        "date",
+        "exchange",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "InstrumentPrice": {
+      "title": "InstrumentPrice",
+      "description": "Latest cached price or NAV for a tracked stock or mutual fund.",
+      "type": "object",
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "instrument_type": {
+          "type": "string",
+          "enum": ["stock", "mutual_fund"],
+          "maxLength": 20
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "exchange": {
+          "type": "string",
+          "enum": ["NSE", "BSE", "N/A"],
+          "maxLength": 10
+        },
+        "latest_price": {
+          "type": "number"
+        },
+        "previous_close": {
+          "type": "number"
+        },
+        "high_52w": {
+          "type": "number"
+        },
+        "low_52w": {
+          "type": "number"
+        },
+        "last_updated": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "source": {
+          "type": "string",
+          "enum": ["yahoo_live", "mfapi_live", "cached_fallback"],
+          "maxLength": 32
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "symbol",
+        "ownerId",
+        "instrument_type",
+        "name",
+        "exchange",
+        "latest_price",
+        "previous_close",
+        "last_updated",
+        "source",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DailySnapshot": {
+      "title": "DailySnapshot",
+      "description": "Daily snapshot of instrument prices and total portfolio value.",
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "prices": {
+          "type": "object"
+        },
+        "portfolio_total_value": {
+          "type": "number"
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "date",
+        "ownerId",
+        "prices",
+        "portfolio_total_value",
+        "timestamp",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Goal": {
+      "title": "Goal",
+      "description": "A financial goal solved via Mode A (required SIP) or Mode B (projected target date).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["A", "B"],
+          "maxLength": 4
+        },
+        "target_amount": {
+          "type": "number"
+        },
+        "accumulated_amount": {
+          "type": "number"
+        },
+        "created_date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "target_date": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "initial_required_sip": {
+          "type": "number"
+        },
+        "current_required_sip": {
+          "type": "number"
+        },
+        "monthly_sip": {
+          "type": "number"
+        },
+        "initial_target_date": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "current_target_date": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "current_months_to_target": {
+          "type": "number"
+        },
+        "last_trailing_1y_return_pct": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "name",
+        "mode",
+        "target_amount",
+        "accumulated_amount",
+        "created_date",
+        "last_trailing_1y_return_pct",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GoalRecalc": {
+      "title": "GoalRecalc",
+      "description": "Monthly recalculation snapshot for an active financial goal.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "goal_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "recalc_date": {
+          "type": "string",
+          "maxLength": 16,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "trailing_1y_return_pct": {
+          "type": "number"
+        },
+        "accumulated_amount": {
+          "type": "number"
+        },
+        "adjusted_monthly_sip": {
+          "type": "number"
+        },
+        "adjusted_target_date": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "adjusted_months_remaining": {
+          "type": "number"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "goal_id",
+        "recalc_date",
+        "trailing_1y_return_pct",
+        "accumulated_amount",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "User buy and sell transactions for stocks and mutual funds."
+    },
+    "/instruments/{instrumentId}": {
+      "schema": { "$ref": "#/entities/InstrumentPrice" },
+      "description": "User cached instrument prices and NAV metadata."
+    },
+    "/snapshots/{snapshotId}": {
+      "schema": { "$ref": "#/entities/DailySnapshot" },
+      "description": "User daily portfolio valuation snapshots."
+    },
+    "/goals/{goalId}": {
+      "schema": { "$ref": "#/entities/Goal" },
+      "description": "User financial goals (Mode A and Mode B)."
+    },
+    "/goal_recalcs/{recalcId}": {
+      "schema": { "$ref": "#/entities/GoalRecalc" },
+      "description": "User monthly goal recalculation history records."
+    }
+  }
+}

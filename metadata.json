@@ -1,0 +1,6 @@
+{
+  "name": "Meridian Portfolio & NAV Ledger",
+  "description": "Real-time equity portfolio management and daily mutual fund NAV tracking platform with live market feeds, XIRR analytics, and data pipeline architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
