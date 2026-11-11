@@ -1264,13 +1264,16 @@ function registerApiRoutes() {
     res.json(buildPortfolioAnalytics(db));
   });
 
-  // 2. Instrument Lookup & Search (Queries both MFAPI.in /mf/search and Indian Stock catalog / Yahoo Finance)
+  // 2. Instrument Lookup & Search (Queries Yahoo Finance live search for all NSE/BSE stocks and MFAPI.in for Mutual Funds)
   app.get('/api/lookup', async (req, res) => {
     const q = String(req.query.q || '').trim();
     const type = String(req.query.type || 'all');
 
     if (!q) {
-      res.json({ results: POPULAR_INDIAN_INSTRUMENTS.slice(0, 10) });
+      const initialList = POPULAR_INDIAN_INSTRUMENTS.filter(
+        (item) => type === 'all' || item.instrument_type === type
+      );
+      res.json({ results: initialList.slice(0, 12) });
       return;
     }
 
@@ -1281,11 +1284,78 @@ function registerApiRoutes() {
           item.name.toLowerCase().includes(q.toLowerCase()))
     );
 
+    const remoteStockResults: typeof POPULAR_INDIAN_INSTRUMENTS = [];
+    if (type === 'all' || type === 'stock') {
+      const fetchYahooQuotes = async (searchTerm: string) => {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3500);
+          const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(
+            searchTerm
+          )}&quotesCount=20&newsCount=0&listsCount=0`;
+          const yRes = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          });
+          clearTimeout(timer);
+          if (!yRes.ok) return [];
+          const data = await yRes.json();
+          return Array.isArray(data?.quotes) ? data.quotes : [];
+        } catch {
+          return [];
+        }
+      };
+
+      let quotes = await fetchYahooQuotes(q);
+      const filterIndianStocks = (rawQuotes: Array<Record<string, unknown>>) => {
+        const list: typeof POPULAR_INDIAN_INSTRUMENTS = [];
+        for (const item of rawQuotes) {
+          const sym = String(item.symbol || '').trim().toUpperCase();
+          const exch = String(item.exchange || '').toUpperCase();
+          const quoteType = String(item.quoteType || '').toUpperCase();
+          const isIndian =
+            sym.endsWith('.NS') ||
+            sym.endsWith('.BO') ||
+            exch === 'NSI' ||
+            exch === 'NSE' ||
+            exch === 'BOM' ||
+            exch === 'BSE';
+          if (isIndian && (quoteType === 'EQUITY' || quoteType === 'ETF' || !quoteType)) {
+            const isBse = sym.endsWith('.BO') || exch === 'BOM' || exch === 'BSE';
+            const normalizedSymbol =
+              sym.endsWith('.NS') || sym.endsWith('.BO')
+                ? sym
+                : `${sym}.${isBse ? 'BO' : 'NS'}`;
+            const displayName = String(
+              item.longname || item.shortname || normalizedSymbol
+            ).trim();
+            list.push({
+              symbol: normalizedSymbol,
+              name: displayName,
+              instrument_type: 'stock',
+              exchange: isBse ? 'BSE' : 'NSE',
+              fallback_price: 0
+            });
+          }
+        }
+        return list;
+      };
+
+      let indianMatches = filterIndianStocks(quotes);
+      if (indianMatches.length < 3 && !q.toLowerCase().includes('.ns') && !q.toLowerCase().includes('.bo')) {
+        const nseQuotes = await fetchYahooQuotes(`${q} NSE`);
+        indianMatches = [...indianMatches, ...filterIndianStocks(nseQuotes)];
+      }
+      remoteStockResults.push(...indianMatches);
+    }
+
     const remoteMfResults: typeof POPULAR_INDIAN_INSTRUMENTS = [];
     if (type === 'all' || type === 'mutual_fund') {
       try {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 3000);
+        const timer = setTimeout(() => controller.abort(), 3500);
         const mfRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`, {
           signal: controller.signal
         });
@@ -1293,13 +1363,13 @@ function registerApiRoutes() {
         if (mfRes.ok) {
           const data = await mfRes.json();
           if (Array.isArray(data)) {
-            for (const item of data.slice(0, 8)) {
+            for (const item of data.slice(0, 12)) {
               remoteMfResults.push({
                 symbol: String(item.schemeCode),
                 name: String(item.schemeName),
                 instrument_type: 'mutual_fund',
                 exchange: 'N/A',
-                fallback_price: 100
+                fallback_price: 0
               });
             }
           }
@@ -1311,13 +1381,13 @@ function registerApiRoutes() {
 
     // Deduplicate by symbol
     const seen = new Set<string>();
-    const combined = [...localMatches, ...remoteMfResults].filter((item) => {
+    const combined = [...localMatches, ...remoteStockResults, ...remoteMfResults].filter((item) => {
       if (seen.has(item.symbol)) return false;
       seen.add(item.symbol);
       return true;
     });
 
-    res.json({ results: combined.slice(0, 12) });
+    res.json({ results: combined.slice(0, 15) });
   });
 
   // 3. Add Buy or Sell Transaction

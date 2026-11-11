@@ -100,19 +100,19 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const res = await fetch(
-          `/api/lookup?q=${encodeURIComponent(searchQuery)}&type=${instrumentType}`
-        );
-        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
-          const data = await res.json();
-          setLookupResults(data.results || []);
-          return;
+        try {
+          const res = await fetch(
+            `/api/lookup?q=${encodeURIComponent(searchQuery)}&type=${instrumentType}`
+          );
+          if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+            const data = await res.json();
+            setLookupResults(data.results || []);
+            return;
+          }
+        } catch {
+          // Fallback to direct client lookup below
         }
-      } catch {
-        // Fallback to direct client lookup below
-      }
 
-      try {
         const q = searchQuery.trim().toLowerCase();
         const localMatches = CLIENT_POPULAR_INSTRUMENTS.filter(
           (item) =>
@@ -124,14 +124,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           if (mfRes.ok) {
             const mfData = await mfRes.json();
             if (Array.isArray(mfData)) {
-              const remoteMf: LookupResult[] = mfData.slice(0, 8).map((m: { schemeCode: string | number; schemeName: string }) => ({
-                symbol: String(m.schemeCode),
-                name: String(m.schemeName),
-                instrument_type: 'mutual_fund',
-                exchange: 'N/A',
-                fallback_price: 100
-              }));
-              setLookupResults([...localMatches, ...remoteMf].slice(0, 10));
+              const remoteMf: LookupResult[] = mfData
+                .slice(0, 10)
+                .map((m: { schemeCode: string | number; schemeName: string }) => ({
+                  symbol: String(m.schemeCode),
+                  name: String(m.schemeName),
+                  instrument_type: 'mutual_fund',
+                  exchange: 'N/A',
+                  fallback_price: 0
+                }));
+              setLookupResults([...localMatches, ...remoteMf].slice(0, 12));
               return;
             }
           }
@@ -208,13 +210,55 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   const sellPreview = computeSellPreview();
 
-  const handleSelectLookup = (item: LookupResult) => {
+  const handleSelectLookup = async (item: LookupResult) => {
     setSymbol(item.symbol);
     setName(item.name);
     setInstrumentType(item.instrument_type);
     setExchange(item.exchange);
-    if (item.fallback_price && !price) {
+    if (item.fallback_price && item.fallback_price > 0) {
       setPrice(String(item.fallback_price));
+    }
+
+    // Fetch live price / NAV from Yahoo Finance or mfapi.in to auto-populate price box
+    try {
+      const res = await fetch('/api/prices/refresh-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: [
+            {
+              symbol: item.symbol,
+              instrument_type: item.instrument_type,
+              name: item.name
+            }
+          ]
+        })
+      });
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+        const json = await res.json();
+        const fetched = json?.instruments?.[0];
+        if (fetched && typeof fetched.latest_price === 'number' && fetched.latest_price > 0) {
+          setPrice(String(fetched.latest_price));
+          return;
+        }
+      }
+    } catch {
+      // Fallback to direct mfapi.in for mutual funds
+    }
+
+    if (item.instrument_type === 'mutual_fund') {
+      try {
+        const mfRes = await fetch(`https://api.mfapi.in/mf/${encodeURIComponent(item.symbol)}`);
+        if (mfRes.ok) {
+          const mfJson = await mfRes.json();
+          const latestNav = parseFloat(mfJson?.data?.[0]?.nav);
+          if (!isNaN(latestNav) && latestNav > 0) {
+            setPrice(String(latestNav));
+          }
+        }
+      } catch {
+        // Ignore
+      }
     }
   };
 

@@ -662,23 +662,64 @@ export async function addTransactionToFirestore(
     handleFirestoreError(error, OperationType.CREATE, `transactions/${docId}`);
   }
 
-  // Ensure instrument price doc exists in Firestore
+  // Ensure instrument price doc exists in Firestore with live market price if available
   if (!existingInstruments[cleanSymbol]) {
     const instDocId = sanitizeId(`${uid}_${cleanSymbol}`);
+    let latestPrice = Number(payload.price);
+    let previousClose = Number(payload.price);
+    let high52w: number | undefined;
+    let low52w: number | undefined;
+    let source: 'yahoo_live' | 'mfapi_live' | 'cached_fallback' = 'cached_fallback';
+
     try {
-      await setDoc(doc(db, 'instruments', instDocId), {
+      const res = await fetch('/api/prices/refresh-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: [
+            {
+              symbol: cleanSymbol,
+              instrument_type: payload.instrument_type,
+              name: payload.name.trim()
+            }
+          ]
+        })
+      });
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+        const json = await res.json();
+        const fetched = json?.instruments?.[0];
+        if (fetched && typeof fetched.latest_price === 'number' && fetched.latest_price > 0) {
+          latestPrice = Number(fetched.latest_price);
+          previousClose = Number(fetched.previous_close || fetched.latest_price);
+          high52w = typeof fetched.high_52w === 'number' ? fetched.high_52w : undefined;
+          low52w = typeof fetched.low_52w === 'number' ? fetched.low_52w : undefined;
+          source =
+            fetched.source === 'yahoo_live' || fetched.source === 'mfapi_live'
+              ? fetched.source
+              : 'cached_fallback';
+        }
+      }
+    } catch {
+      // Fall back to user-entered buy price
+    }
+
+    try {
+      const instDoc: Record<string, unknown> = {
         symbol: cleanSymbol,
         ownerId: uid,
         instrument_type: payload.instrument_type,
         name: payload.name.trim().slice(0, 160),
         exchange: payload.exchange,
-        latest_price: Number(payload.price),
-        previous_close: Number(payload.price),
+        latest_price: latestPrice,
+        previous_close: previousClose,
         last_updated: new Date().toISOString().slice(0, 40),
-        source: 'cached_fallback',
+        source,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
+      };
+      if (typeof high52w === 'number') instDoc.high_52w = high52w;
+      if (typeof low52w === 'number') instDoc.low_52w = low52w;
+      await setDoc(doc(db, 'instruments', instDocId), instDoc);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `instruments/${instDocId}`);
     }
