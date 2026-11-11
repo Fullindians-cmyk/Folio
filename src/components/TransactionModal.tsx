@@ -28,6 +28,25 @@ interface TransactionModalProps {
   initialTxType?: TransactionType;
 }
 
+const CLIENT_POPULAR_INSTRUMENTS: LookupResult[] = [
+  { symbol: 'RELIANCE.NS', name: 'Reliance Industries Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 1294.65 },
+  { symbol: 'HDFCBANK.NS', name: 'HDFC Bank Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 1742.30 },
+  { symbol: 'TCS.NS', name: 'Tata Consultancy Services Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 4148.75 },
+  { symbol: 'INFY.NS', name: 'Infosys Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 1864.20 },
+  { symbol: 'ICICIBANK.NS', name: 'ICICI Bank Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 1288.40 },
+  { symbol: 'BHARTIARTL.NS', name: 'Bharti Airtel Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 1642.10 },
+  { symbol: 'SBIN.NS', name: 'State Bank of India', instrument_type: 'stock', exchange: 'NSE', fallback_price: 842.50 },
+  { symbol: 'LT.NS', name: 'Larsen & Toubro Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 3624.00 },
+  { symbol: 'ITC.NS', name: 'ITC Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 478.90 },
+  { symbol: 'SUNPHARMA.NS', name: 'Sun Pharmaceutical Industries Ltd.', instrument_type: 'stock', exchange: 'NSE', fallback_price: 1815.60 },
+  { symbol: '122639', name: 'Parag Parikh Flexi Cap Fund - Direct Plan - Growth', instrument_type: 'mutual_fund', exchange: 'N/A', fallback_price: 84.6214 },
+  { symbol: '120716', name: 'UTI Nifty 50 Index Fund - Direct Plan - Growth', instrument_type: 'mutual_fund', exchange: 'N/A', fallback_price: 168.3942 },
+  { symbol: '118989', name: 'HDFC Mid-Cap Opportunities Fund - Direct Plan - Growth', instrument_type: 'mutual_fund', exchange: 'N/A', fallback_price: 196.4820 },
+  { symbol: '120503', name: 'Axis ELSS Tax Saver Fund - Direct Plan - Growth', instrument_type: 'mutual_fund', exchange: 'N/A', fallback_price: 98.4120 },
+  { symbol: '125497', name: 'SBI Small Cap Fund - Direct Plan - Growth', instrument_type: 'mutual_fund', exchange: 'N/A', fallback_price: 189.7340 },
+  { symbol: '119598', name: 'Mirae Asset Large & Midcap Fund - Direct Plan - Growth', instrument_type: 'mutual_fund', exchange: 'N/A', fallback_price: 158.9210 }
+];
+
 export const TransactionModal: React.FC<TransactionModalProps> = ({
   isOpen,
   onClose,
@@ -84,12 +103,42 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         const res = await fetch(
           `/api/lookup?q=${encodeURIComponent(searchQuery)}&type=${instrumentType}`
         );
-        if (res.ok) {
+        if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
           const data = await res.json();
           setLookupResults(data.results || []);
+          return;
         }
       } catch {
-        // ignore
+        // Fallback to direct client lookup below
+      }
+
+      try {
+        const q = searchQuery.trim().toLowerCase();
+        const localMatches = CLIENT_POPULAR_INSTRUMENTS.filter(
+          (item) =>
+            item.instrument_type === instrumentType &&
+            (!q || item.symbol.toLowerCase().includes(q) || item.name.toLowerCase().includes(q))
+        );
+        if (instrumentType === 'mutual_fund' && q) {
+          const mfRes = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(q)}`);
+          if (mfRes.ok) {
+            const mfData = await mfRes.json();
+            if (Array.isArray(mfData)) {
+              const remoteMf: LookupResult[] = mfData.slice(0, 8).map((m: { schemeCode: string | number; schemeName: string }) => ({
+                symbol: String(m.schemeCode),
+                name: String(m.schemeName),
+                instrument_type: 'mutual_fund',
+                exchange: 'N/A',
+                fallback_price: 100
+              }));
+              setLookupResults([...localMatches, ...remoteMf].slice(0, 10));
+              return;
+            }
+          }
+        }
+        setLookupResults(localMatches);
+      } catch {
+        setLookupResults([]);
       } finally {
         setIsSearching(false);
       }

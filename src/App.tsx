@@ -11,13 +11,9 @@ import {
   Briefcase,
   Target,
   BarChart3,
-  History,
-  Cloud,
-  LogOut,
-  LogIn
+  History
 } from 'lucide-react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, loginWithGoogle, logoutFirebase } from './firebase';
+import { PERSONAL_PORTFOLIO_ID } from './firebase';
 import {
   addTransactionToFirestore,
   buildPortfolioAnalyticsFromFirestore,
@@ -25,6 +21,7 @@ import {
   deleteGoalFromFirestore,
   deleteTransactionFromFirestore,
   FirestoreInstrumentDoc,
+  getClientFallbackPortfolio,
   runDailySnapshotInFirestore,
   runMonthlyGoalRecalcInFirestore,
   seedUserFirestoreIfEmpty,
@@ -57,11 +54,7 @@ export default function App() {
     '122639': false
   });
 
-  // Firebase Auth & Firestore State
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
-  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  // Firebase Firestore State (Single-User Personal Workspace)
   const firestoreInstrumentsRef = useRef<Record<string, FirestoreInstrumentDoc>>({});
 
   // Modal state
@@ -69,104 +62,66 @@ export default function App() {
   const [modalInitialSymbol, setModalInitialSymbol] = useState<string | undefined>(undefined);
   const [modalInitialTxType, setModalInitialTxType] = useState<TransactionType>('buy');
 
-  const fetchLocalPortfolio = async (): Promise<PortfolioDataResponse | null> => {
+  const fetchLocalPortfolio = async (): Promise<PortfolioDataResponse> => {
     try {
       const res = await fetch('/api/portfolio');
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const json = (await res.json()) as PortfolioDataResponse;
         setData(json);
         return json;
       }
+    } catch {
+      // Fallback to built-in client portfolio below
     } finally {
       setIsLoading(false);
     }
-    return null;
+    const fallback = getClientFallbackPortfolio();
+    setData(fallback);
+    return fallback;
   };
 
-  // Track Firebase Authentication state
+  // Automatically connect and sync with Firebase Firestore on startup across all devices
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setIsAuthReady(true);
-    });
-    return () => unsubAuth();
-  }, []);
-
-  // Load initial portfolio and attach Firestore real-time listeners when authenticated
-  useEffect(() => {
-    if (!isAuthReady) return;
-
     let unsubFirestore: (() => void) | undefined;
 
-    if (currentUser) {
-      setIsCloudSyncing(true);
-      fetchLocalPortfolio().then(async (initialFallback) => {
-        if (initialFallback) {
-          try {
-            await seedUserFirestoreIfEmpty(currentUser.uid, initialFallback);
-          } catch (err) {
-            console.error('Error seeding Firestore:', err);
-          }
-        }
+    fetchLocalPortfolio().then(async (initialFallback) => {
+      try {
+        await seedUserFirestoreIfEmpty(PERSONAL_PORTFOLIO_ID, initialFallback);
+      } catch (err) {
+        console.error('Error seeding Firestore:', err);
+      }
 
-        unsubFirestore = subscribeToUserPortfolio(currentUser.uid, (cloudState) => {
-          firestoreInstrumentsRef.current = cloudState.instruments;
-          if (cloudState.transactions.length > 0 || cloudState.goals.length > 0) {
-            const computed = buildPortfolioAnalyticsFromFirestore(
-              cloudState.transactions,
-              cloudState.instruments,
-              cloudState.snapshots,
-              cloudState.goals,
-              cloudState.recalcs
-            );
-            setData(computed);
-          }
-          setIsCloudSyncing(false);
-          setIsLoading(false);
-        });
+      unsubFirestore = subscribeToUserPortfolio(PERSONAL_PORTFOLIO_ID, (cloudState) => {
+        firestoreInstrumentsRef.current = cloudState.instruments;
+        if (cloudState.transactions.length > 0 || cloudState.goals.length > 0) {
+          const computed = buildPortfolioAnalyticsFromFirestore(
+            cloudState.transactions,
+            cloudState.instruments,
+            cloudState.snapshots,
+            cloudState.goals,
+            cloudState.recalcs
+          );
+          setData(computed);
+        }
+        setIsLoading(false);
       });
-    } else {
-      // Unauthenticated local preview fallback
-      fetchLocalPortfolio().then(() => {
-        handleRunDailySnapshotJob();
-      });
-    }
+    });
 
     return () => {
       if (unsubFirestore) unsubFirestore();
     };
-  }, [isAuthReady, currentUser]);
-
-  const handleGoogleSignIn = async () => {
-    setAuthError(null);
-    try {
-      await loginWithGoogle();
-    } catch (err: unknown) {
-      setAuthError(err instanceof Error ? err.message : 'Google Sign-In failed');
-    }
-  };
-
-  const handleSignOut = async () => {
-    setAuthError(null);
-    await logoutFirebase();
-  };
+  }, []);
 
   const handleRunDailySnapshotJob = async () => {
     setIsRunningDailyJob(true);
     try {
-      if (currentUser && data) {
+      if (data) {
         await runDailySnapshotInFirestore(
-          currentUser.uid,
+          PERSONAL_PORTFOLIO_ID,
           data.transactions,
           firestoreInstrumentsRef.current,
           data.price_snapshots
         );
-      } else {
-        const res = await fetch('/api/jobs/daily-snapshot', { method: 'POST' });
-        if (res.ok) {
-          const json = (await res.json()) as PortfolioDataResponse;
-          setData(json);
-        }
       }
     } finally {
       setIsRunningDailyJob(false);
@@ -184,8 +139,7 @@ export default function App() {
     exchange: ExchangeType;
     target_lot_id?: string;
   }) => {
-    if (currentUser && data) {
-      // Check sufficient open quantity on sell
+    if (data) {
       if (payload.transaction_type === 'sell') {
         const match = data.holdings.find(
           (h) => h.symbol.toUpperCase() === payload.symbol.trim().toUpperCase()
@@ -198,36 +152,15 @@ export default function App() {
         }
       }
       await addTransactionToFirestore(
-        currentUser.uid,
+        PERSONAL_PORTFOLIO_ID,
         payload,
         firestoreInstrumentsRef.current
       );
-      return;
     }
-
-    const res = await fetch('/api/transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Failed to save transaction');
-    }
-    const json = (await res.json()) as PortfolioDataResponse;
-    setData(json);
   };
 
   const handleDeleteTransaction = async (id: string) => {
-    if (currentUser) {
-      await deleteTransactionFromFirestore(currentUser.uid, id);
-      return;
-    }
-    const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      const json = (await res.json()) as PortfolioDataResponse;
-      setData(json);
-    }
+    await deleteTransactionFromFirestore(PERSONAL_PORTFOLIO_ID, id);
   };
 
   const handleCreateGoal = async (payload: {
@@ -239,35 +172,19 @@ export default function App() {
     monthly_sip?: number;
     custom_return_pct?: number;
   }) => {
-    if (currentUser && data) {
+    if (data) {
       await createGoalInFirestore(
-        currentUser.uid,
+        PERSONAL_PORTFOLIO_ID,
         payload,
         data.summary.trailing_1y_return_pct,
         data.summary.reference_date
       );
-      return;
-    }
-    const res = await fetch('/api/goals', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      const json = (await res.json()) as PortfolioDataResponse;
-      setData(json);
     }
   };
 
   const handleDeleteGoal = async (id: string) => {
-    if (currentUser && data) {
+    if (data) {
       await deleteGoalFromFirestore(id, data.goal_recalc_history);
-      return;
-    }
-    const res = await fetch(`/api/goals/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      const json = (await res.json()) as PortfolioDataResponse;
-      setData(json);
     }
   };
 
@@ -277,18 +194,8 @@ export default function App() {
     accumulated_Increment: number;
     note: string;
   }) => {
-    if (currentUser && data) {
-      await runMonthlyGoalRecalcInFirestore(currentUser.uid, data.goals, payload);
-      return;
-    }
-    const res = await fetch('/api/jobs/monthly-goal-recalc', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      const json = (await res.json()) as PortfolioDataResponse;
-      setData(json);
+    if (data) {
+      await runMonthlyGoalRecalcInFirestore(PERSONAL_PORTFOLIO_ID, data.goals, payload);
     }
   };
 
@@ -433,56 +340,6 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-5 px-3.5 pt-4 pb-24 sm:space-y-8 sm:px-6 sm:pt-7 md:pb-12">
-        {/* Firebase Firestore Cloud Database Connection & Auth Banner */}
-        <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 sm:flex-row sm:items-center sm:px-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-800">
-              <Cloud className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="text-xs font-semibold text-slate-900">
-                {currentUser
-                  ? `Firebase Firestore Cloud Database Active (${currentUser.email})`
-                  : 'Firebase Firestore Cloud Database Ready'}
-              </div>
-              <div className="text-[11px] text-slate-500">
-                {currentUser
-                  ? isCloudSyncing
-                    ? 'Syncing transactions, snapshots, and goals with Firestore...'
-                    : 'All holdings, FIFO lots, daily snapshots, and SIP goals are synced in real time to your private Firestore collections.'
-                  : 'Sign in with Google to persist and sync your portfolio, daily snapshots, and goals in Firebase Firestore across devices.'}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {currentUser ? (
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 sm:w-auto whitespace-nowrap"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                Sign Out
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 sm:w-auto whitespace-nowrap"
-              >
-                <LogIn className="h-3.5 w-3.5" />
-                Sign in with Google (Sync Firestore)
-              </button>
-            )}
-          </div>
-        </div>
-
-        {authError && (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs text-rose-700">
-            {authError}
-          </div>
-        )}
 
         {/* Quick Action & Desktop Switcher Bar */}
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">

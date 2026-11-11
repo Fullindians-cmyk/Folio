@@ -854,14 +854,88 @@ export async function runDailySnapshotInFirestore(
     };
   });
 
-  const res = await fetch('/api/prices/refresh-batch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: itemsToRefresh })
-  });
-  if (!res.ok) return;
+  let refreshedList: Array<{
+    symbol: string;
+    instrument_type: InstrumentType;
+    name: string;
+    exchange: ExchangeType;
+    latest_price: number;
+    previous_close: number;
+    high_52w?: number;
+    low_52w?: number;
+    last_updated: string;
+    source: 'yahoo_live' | 'mfapi_live' | 'cached_fallback';
+  }> = [];
 
-  const { instruments: refreshedList } = await res.json();
+  try {
+    const res = await fetch('/api/prices/refresh-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: itemsToRefresh })
+    });
+    if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
+      const json = await res.json();
+      if (Array.isArray(json?.instruments)) {
+        refreshedList = json.instruments;
+      }
+    }
+  } catch {
+    // Fallback to direct client-side fetch below
+  }
+
+  // Browser-direct fallback (queries api.mfapi.in directly for mutual funds if backend is unreachable)
+  if (refreshedList.length === 0) {
+    refreshedList = await Promise.all(
+      itemsToRefresh.map(async (item) => {
+        const existing = existingInstruments[item.symbol];
+        if (item.instrument_type === 'mutual_fund') {
+          try {
+            const mfRes = await fetch(`https://api.mfapi.in/mf/${encodeURIComponent(item.symbol)}`);
+            if (mfRes.ok) {
+              const mfJson = await mfRes.json();
+              if (Array.isArray(mfJson?.data) && mfJson.data.length > 0) {
+                const latestNav = parseFloat(mfJson.data[0].nav);
+                const prevNav = mfJson.data[1] ? parseFloat(mfJson.data[1].nav) : latestNav;
+                if (!isNaN(latestNav) && latestNav > 0) {
+                  return {
+                    symbol: item.symbol,
+                    instrument_type: 'mutual_fund' as InstrumentType,
+                    name: mfJson.meta?.scheme_name || item.name,
+                    exchange: 'N/A' as ExchangeType,
+                    latest_price: latestNav,
+                    previous_close: !isNaN(prevNav) && prevNav > 0 ? prevNav : latestNav,
+                    last_updated: new Date().toISOString(),
+                    source: 'mfapi_live' as const
+                  };
+                }
+              }
+            }
+          } catch {
+            // Fall through to cached
+          }
+        }
+        return {
+          symbol: item.symbol,
+          instrument_type: item.instrument_type as InstrumentType,
+          name: existing?.name || item.name,
+          exchange:
+            existing?.exchange ||
+            (item.instrument_type === 'mutual_fund'
+              ? 'N/A'
+              : item.symbol.endsWith('.BO')
+                ? 'BSE'
+                : 'NSE'),
+          latest_price: existing?.latest_price || 100,
+          previous_close: existing?.previous_close || 99,
+          high_52w: existing?.high_52w,
+          low_52w: existing?.low_52w,
+          last_updated: new Date().toISOString(),
+          source: existing?.source || ('cached_fallback' as const)
+        };
+      })
+    );
+  }
+
   const updatedMap: Record<string, FirestoreInstrumentDoc> = { ...existingInstruments };
   const updatedPrices: Record<string, number> = {};
 
@@ -1028,3 +1102,375 @@ export async function runMonthlyGoalRecalcInFirestore(
     handleFirestoreError(error, OperationType.WRITE, 'monthly_goal_recalc');
   }
 }
+
+/**
+ * Built-in client-side fallback portfolio so the app immediately loads even if
+ * deployed to a static host (e.g. GitHub Pages) or during a serverless cold start.
+ */
+export function getClientFallbackPortfolio(): PortfolioDataResponse {
+  const todayStr = '2026-11-10';
+  const instruments: Record<string, FirestoreInstrumentDoc> = {
+    'RELIANCE.NS': {
+      symbol: 'RELIANCE.NS',
+      ownerId: 'local',
+      instrument_type: 'stock',
+      name: 'Reliance Industries Ltd.',
+      exchange: 'NSE',
+      latest_price: 1294.65,
+      previous_close: 1281.4,
+      high_52w: 1608.8,
+      low_52w: 1156.0,
+      last_updated: '2026-11-10T10:00:00Z',
+      source: 'cached_fallback'
+    },
+    'HDFCBANK.NS': {
+      symbol: 'HDFCBANK.NS',
+      ownerId: 'local',
+      instrument_type: 'stock',
+      name: 'HDFC Bank Ltd.',
+      exchange: 'NSE',
+      latest_price: 1742.3,
+      previous_close: 1728.9,
+      high_52w: 1794.0,
+      low_52w: 1363.55,
+      last_updated: '2026-11-10T10:00:00Z',
+      source: 'cached_fallback'
+    },
+    'TCS.NS': {
+      symbol: 'TCS.NS',
+      ownerId: 'local',
+      instrument_type: 'stock',
+      name: 'Tata Consultancy Services Ltd.',
+      exchange: 'NSE',
+      latest_price: 4148.75,
+      previous_close: 4162.1,
+      high_52w: 4592.25,
+      low_52w: 3591.5,
+      last_updated: '2026-11-10T10:00:00Z',
+      source: 'cached_fallback'
+    },
+    '122639': {
+      symbol: '122639',
+      ownerId: 'local',
+      instrument_type: 'mutual_fund',
+      name: 'Parag Parikh Flexi Cap Fund - Direct Plan - Growth',
+      exchange: 'N/A',
+      latest_price: 84.6214,
+      previous_close: 84.1108,
+      last_updated: '2026-11-10T10:00:00Z',
+      source: 'cached_fallback'
+    },
+    '120716': {
+      symbol: '120716',
+      ownerId: 'local',
+      instrument_type: 'mutual_fund',
+      name: 'UTI Nifty 50 Index Fund - Direct Plan - Growth',
+      exchange: 'N/A',
+      latest_price: 168.3942,
+      previous_close: 167.218,
+      last_updated: '2026-11-10T10:00:00Z',
+      source: 'cached_fallback'
+    },
+    '118989': {
+      symbol: '118989',
+      ownerId: 'local',
+      instrument_type: 'mutual_fund',
+      name: 'HDFC Mid-Cap Opportunities Fund - Direct Plan - Growth',
+      exchange: 'N/A',
+      latest_price: 196.482,
+      previous_close: 194.85,
+      last_updated: '2026-11-10T10:00:00Z',
+      source: 'cached_fallback'
+    }
+  };
+
+  const transactions: TransactionRecord[] = [
+    {
+      id: 'tx-101',
+      instrument_type: 'stock',
+      transaction_type: 'buy',
+      symbol: 'RELIANCE.NS',
+      name: 'Reliance Industries Ltd.',
+      quantity: 120,
+      price: 785.0,
+      date: '2021-08-16',
+      exchange: 'NSE'
+    },
+    {
+      id: 'tx-102',
+      instrument_type: 'stock',
+      transaction_type: 'buy',
+      symbol: 'RELIANCE.NS',
+      name: 'Reliance Industries Ltd.',
+      quantity: 60,
+      price: 1120.0,
+      date: '2025-02-10',
+      exchange: 'NSE'
+    },
+    {
+      id: 'tx-103',
+      instrument_type: 'stock',
+      transaction_type: 'sell',
+      symbol: 'RELIANCE.NS',
+      name: 'Reliance Industries Ltd.',
+      quantity: 40,
+      price: 1310.0,
+      date: '2026-06-18',
+      exchange: 'NSE'
+    },
+    {
+      id: 'tx-104',
+      instrument_type: 'mutual_fund',
+      transaction_type: 'buy',
+      symbol: '122639',
+      name: 'Parag Parikh Flexi Cap Fund - Direct Plan - Growth',
+      quantity: 2450.525,
+      price: 46.8,
+      date: '2021-10-05',
+      exchange: 'N/A'
+    },
+    {
+      id: 'tx-105',
+      instrument_type: 'mutual_fund',
+      transaction_type: 'buy',
+      symbol: '122639',
+      name: 'Parag Parikh Flexi Cap Fund - Direct Plan - Growth',
+      quantity: 1150.0,
+      price: 68.4,
+      date: '2025-04-14',
+      exchange: 'N/A'
+    },
+    {
+      id: 'tx-106',
+      instrument_type: 'stock',
+      transaction_type: 'buy',
+      symbol: 'HDFCBANK.NS',
+      name: 'HDFC Bank Ltd.',
+      quantity: 95,
+      price: 1465.0,
+      date: '2024-05-20',
+      exchange: 'NSE'
+    },
+    {
+      id: 'tx-107',
+      instrument_type: 'mutual_fund',
+      transaction_type: 'buy',
+      symbol: '120716',
+      name: 'UTI Nifty 50 Index Fund - Direct Plan - Growth',
+      quantity: 1420.85,
+      price: 138.2,
+      date: '2024-11-01',
+      exchange: 'N/A'
+    },
+    {
+      id: 'tx-108',
+      instrument_type: 'mutual_fund',
+      transaction_type: 'buy',
+      symbol: '118989',
+      name: 'HDFC Mid-Cap Opportunities Fund - Direct Plan - Growth',
+      quantity: 520.0,
+      price: 191.2,
+      date: '2026-10-20',
+      exchange: 'N/A'
+    },
+    {
+      id: 'tx-109',
+      instrument_type: 'stock',
+      transaction_type: 'buy',
+      symbol: 'TCS.NS',
+      name: 'Tata Consultancy Services Ltd.',
+      quantity: 35,
+      price: 3680.0,
+      date: '2025-07-12',
+      exchange: 'NSE'
+    },
+    {
+      id: 'tx-110',
+      instrument_type: 'stock',
+      transaction_type: 'sell',
+      symbol: 'TCS.NS',
+      name: 'Tata Consultancy Services Ltd.',
+      quantity: 10,
+      price: 4290.0,
+      date: '2026-09-04',
+      exchange: 'NSE'
+    }
+  ];
+
+  const anchorPrices: Array<{ date: string; prices: Record<string, number> }> = [
+    {
+      date: '2021-11-10',
+      prices: {
+        'RELIANCE.NS': 812.4,
+        'HDFCBANK.NS': 1290.0,
+        'TCS.NS': 3180.0,
+        '122639': 48.12,
+        '120716': 104.5,
+        '118989': 94.2
+      }
+    },
+    {
+      date: '2025-11-10',
+      prices: {
+        'RELIANCE.NS': 1118.5,
+        'HDFCBANK.NS': 1512.0,
+        'TCS.NS': 3740.0,
+        '122639': 69.85,
+        '120716': 144.6,
+        '118989': 156.4
+      }
+    },
+    {
+      date: '2026-05-10',
+      prices: {
+        'RELIANCE.NS': 1198.2,
+        'HDFCBANK.NS': 1618.4,
+        'TCS.NS': 3925.0,
+        '122639': 76.42,
+        '120716': 155.8,
+        '118989': 174.9
+      }
+    },
+    {
+      date: '2026-08-10',
+      prices: {
+        'RELIANCE.NS': 1244.8,
+        'HDFCBANK.NS': 1682.5,
+        'TCS.NS': 4055.0,
+        '122639': 80.45,
+        '120716': 162.1,
+        '118989': 185.9
+      }
+    },
+    {
+      date: '2026-10-11',
+      prices: {
+        'RELIANCE.NS': 1269.4,
+        'HDFCBANK.NS': 1711.2,
+        'TCS.NS': 4118.0,
+        '122639': 82.95,
+        '120716': 165.45,
+        '118989': 191.0
+      }
+    },
+    {
+      date: '2026-11-03',
+      prices: {
+        'RELIANCE.NS': 1281.9,
+        'HDFCBANK.NS': 1726.8,
+        'TCS.NS': 4158.0,
+        '122639': 83.82,
+        '120716': 166.95,
+        '118989': 194.1
+      }
+    },
+    {
+      date: todayStr,
+      prices: {
+        'RELIANCE.NS': 1294.65,
+        'HDFCBANK.NS': 1742.3,
+        'TCS.NS': 4148.75,
+        '122639': 84.6214,
+        '120716': 168.3942,
+        '118989': 196.482
+      }
+    }
+  ];
+
+  const price_snapshots: DailyInstrumentSnapshot[] = anchorPrices.map((snap) => {
+    const { openLots } = computePortfolioLotsAndPnlClient(
+      transactions,
+      instruments,
+      snap.date,
+      snap.prices
+    );
+    const totalVal = openLots.reduce((sum, l) => sum + l.current_value, 0);
+    return {
+      date: snap.date,
+      prices: snap.prices,
+      portfolio_total_value: Number(totalVal.toFixed(2)),
+      timestamp: `${snap.date}T16:30:00Z`
+    };
+  });
+
+  const trailing1Y = 16.82;
+  const reqSipA = Math.round(calculateModeASip(25000000, 120, trailing1Y, 952400).requiredMonthlySip);
+
+  const goals: GoalRecord[] = [
+    {
+      id: 'goal-mode-a-1',
+      name: 'Retirement Freedom Corpus',
+      mode: 'A',
+      target_amount: 25000000,
+      accumulated_amount: 952400,
+      created_date: '2026-06-01',
+      target_date: '2036-11-10',
+      initial_required_sip: 58420,
+      current_required_sip: reqSipA,
+      last_trailing_1y_return_pct: trailing1Y
+    },
+    {
+      id: 'goal-mode-b-1',
+      name: 'Home Downpayment Fund',
+      mode: 'B',
+      target_amount: 4500000,
+      accumulated_amount: 620000,
+      created_date: '2026-06-01',
+      monthly_sip: 45000,
+      initial_target_date: '2030-09-15',
+      current_target_date: '2030-07-24',
+      current_months_to_target: 44.5,
+      last_trailing_1y_return_pct: trailing1Y
+    }
+  ];
+
+  const goal_recalc_history: GoalRecalcEntry[] = [
+    {
+      id: 'recalc-1',
+      goal_id: 'goal-mode-a-1',
+      recalc_date: '2026-06-10',
+      trailing_1y_return_pct: 15.1,
+      accumulated_amount: 810000,
+      adjusted_monthly_sip: 61850,
+      note: 'Initial baseline schedule'
+    },
+    {
+      id: 'recalc-6',
+      goal_id: 'goal-mode-a-1',
+      recalc_date: '2026-11-10',
+      trailing_1y_return_pct: trailing1Y,
+      accumulated_amount: 952400,
+      adjusted_monthly_sip: reqSipA,
+      note: 'Latest monthly recalculation'
+    },
+    {
+      id: 'recalc-b1',
+      goal_id: 'goal-mode-b-1',
+      recalc_date: '2026-06-10',
+      trailing_1y_return_pct: 15.1,
+      accumulated_amount: 510000,
+      adjusted_months_remaining: 48.2,
+      adjusted_target_date: '2030-06-16',
+      note: 'Initial baseline schedule'
+    },
+    {
+      id: 'recalc-b6',
+      goal_id: 'goal-mode-b-1',
+      recalc_date: '2026-11-10',
+      trailing_1y_return_pct: trailing1Y,
+      accumulated_amount: 620000,
+      adjusted_months_remaining: 44.5,
+      adjusted_target_date: '2030-07-24',
+      note: 'Latest monthly recalculation'
+    }
+  ];
+
+  return buildPortfolioAnalyticsFromFirestore(
+    transactions,
+    instruments,
+    price_snapshots,
+    goals,
+    goal_recalc_history
+  );
+}
+

@@ -1,8 +1,8 @@
 import express from 'express';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,8 +86,11 @@ interface DatabaseSchema {
   last_monthly_recalc_run: string;
 }
 
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'meridian_portfolio_data')
+  : path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'portfolio_db.json');
+let memoryFallbackDb: DatabaseSchema | null = null;
 
 // Popular Indian Stocks & AMFI Mutual Funds catalog for instant search + fallback
 const POPULAR_INDIAN_INSTRUMENTS: Array<{
@@ -867,29 +870,38 @@ function createInitialSeedDatabase(): DatabaseSchema {
 }
 
 function loadDb(): DatabaseSchema {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(DB_PATH)) {
-    const seed = createInitialSeedDatabase();
-    fs.writeFileSync(DB_PATH, JSON.stringify(seed, null, 2), 'utf-8');
-    return seed;
-  }
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(DB_PATH)) {
+      const seed = memoryFallbackDb || createInitialSeedDatabase();
+      memoryFallbackDb = seed;
+      fs.writeFileSync(DB_PATH, JSON.stringify(seed, null, 2), 'utf-8');
+      return seed;
+    }
     const raw = fs.readFileSync(DB_PATH, 'utf-8');
-    return JSON.parse(raw) as DatabaseSchema;
+    const parsed = JSON.parse(raw) as DatabaseSchema;
+    memoryFallbackDb = parsed;
+    return parsed;
   } catch {
-    const seed = createInitialSeedDatabase();
-    fs.writeFileSync(DB_PATH, JSON.stringify(seed, null, 2), 'utf-8');
-    return seed;
+    if (!memoryFallbackDb) {
+      memoryFallbackDb = createInitialSeedDatabase();
+    }
+    return memoryFallbackDb;
   }
 }
 
 function saveDb(db: DatabaseSchema) {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  memoryFallbackDb = db;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
+  } catch {
+    // Ignore read-only filesystem errors on serverless environments; memoryFallbackDb holds state
   }
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
 }
 
 // Fetch live price from Yahoo Finance (.NS / .BO) or MFAPI.in (AMFI scheme code)
@@ -1241,10 +1253,10 @@ function buildPortfolioAnalytics(db: DatabaseSchema) {
   };
 }
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
-  app.use(express.json());
+export const app = express();
+app.use(express.json());
+
+function registerApiRoutes() {
 
   // 1. Get complete Portfolio, Period P/L%, Snapshots, and Goal Tracker state
   app.get('/api/portfolio', (_req, res) => {
@@ -1624,8 +1636,15 @@ async function startServer() {
       instruments: refreshedList
     });
   });
+}
+
+registerApiRoutes();
+
+async function startServer() {
+  const PORT = 3000;
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
@@ -1644,4 +1663,7 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+export default app;

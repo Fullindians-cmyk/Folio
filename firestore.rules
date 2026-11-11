@@ -7,9 +7,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Core Primitives
-    function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+    // Core Primitives (Single-User Personal Portfolio Workspace)
+    function isPersonalWorkspace(ownerId) {
+      return ownerId is string && ownerId.size() <= 128 && ownerId == 'personal-portfolio';
     }
 
     function incoming() {
@@ -37,7 +37,7 @@ service cloud.firestore {
           'target_lot_id', 'createdAt', 'updatedAt'
         ]) &&
         data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
-        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        isPersonalWorkspace(data.ownerId) &&
         data.instrument_type is string && data.instrument_type.size() <= 20 && (data.instrument_type == 'stock' || data.instrument_type == 'mutual_fund') &&
         data.transaction_type is string && data.transaction_type.size() <= 10 && (data.transaction_type == 'buy' || data.transaction_type == 'sell') &&
         data.symbol is string && data.symbol.size() >= 1 && data.symbol.size() <= 32 &&
@@ -64,7 +64,7 @@ service cloud.firestore {
           'last_updated', 'source', 'createdAt', 'updatedAt'
         ]) &&
         data.symbol is string && data.symbol.size() >= 1 && data.symbol.size() <= 32 &&
-        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        isPersonalWorkspace(data.ownerId) &&
         data.instrument_type is string && data.instrument_type.size() <= 20 && (data.instrument_type == 'stock' || data.instrument_type == 'mutual_fund') &&
         data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
         data.exchange is string && data.exchange.size() <= 10 && (data.exchange == 'NSE' || data.exchange == 'BSE' || data.exchange == 'N/A') &&
@@ -89,7 +89,7 @@ service cloud.firestore {
           'createdAt', 'updatedAt'
         ]) &&
         data.date is string && data.date.size() <= 16 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
-        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        isPersonalWorkspace(data.ownerId) &&
         data.prices is map && data.prices.keys().size() <= 100 &&
         data.portfolio_total_value is number && data.portfolio_total_value >= 0 &&
         data.timestamp is string && data.timestamp.size() <= 40 &&
@@ -112,7 +112,7 @@ service cloud.firestore {
           'last_trailing_1y_return_pct', 'createdAt', 'updatedAt'
         ]) &&
         data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
-        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        isPersonalWorkspace(data.ownerId) &&
         data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
         data.mode is string && data.mode.size() <= 4 && (data.mode == 'A' || data.mode == 'B') &&
         data.target_amount is number && data.target_amount > 0 &&
@@ -145,7 +145,7 @@ service cloud.firestore {
           'createdAt', 'updatedAt'
         ]) &&
         data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
-        data.ownerId is string && data.ownerId.size() <= 128 && data.ownerId == request.auth.uid &&
+        isPersonalWorkspace(data.ownerId) &&
         data.goal_id is string && data.goal_id.size() >= 1 && data.goal_id.size() <= 64 && data.goal_id.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.recalc_date is string && data.recalc_date.size() <= 16 && data.recalc_date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
         data.trailing_1y_return_pct is number &&
@@ -160,28 +160,28 @@ service cloud.firestore {
 
     // 1. /transactions/{transactionId}
     match /transactions/{transactionId} {
-      allow get: if isSignedIn() && isValidId(transactionId) && existing().ownerId == request.auth.uid;
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming()) &&
+      allow get: if isValidId(transactionId) && isPersonalWorkspace(existing().ownerId);
+      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow create: if isValidId(transactionId) && isValidTransaction(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming()) &&
-        existing().ownerId == request.auth.uid &&
+      allow update: if isValidId(transactionId) && isValidTransaction(incoming()) &&
+        isPersonalWorkspace(existing().ownerId) &&
         incoming().ownerId == existing().ownerId &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'price', 'date', 'name', 'updatedAt']);
-      allow delete: if isSignedIn() && isValidId(transactionId) && existing().ownerId == request.auth.uid;
+      allow delete: if isValidId(transactionId) && isPersonalWorkspace(existing().ownerId);
     }
 
     // 2. /instruments/{instrumentId}
     match /instruments/{instrumentId} {
-      allow get: if isSignedIn() && isValidId(instrumentId) && existing().ownerId == request.auth.uid;
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
+      allow get: if isValidId(instrumentId) && isPersonalWorkspace(existing().ownerId);
+      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow create: if isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isSignedIn() && isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
-        existing().ownerId == request.auth.uid &&
+      allow update: if isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
+        isPersonalWorkspace(existing().ownerId) &&
         incoming().ownerId == existing().ownerId &&
         incoming().symbol == existing().symbol &&
         incoming().createdAt == existing().createdAt &&
@@ -189,17 +189,17 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'name', 'latest_price', 'previous_close', 'high_52w', 'low_52w', 'last_updated', 'source', 'updatedAt'
         ]);
-      allow delete: if isSignedIn() && isValidId(instrumentId) && existing().ownerId == request.auth.uid;
+      allow delete: if isValidId(instrumentId) && isPersonalWorkspace(existing().ownerId);
     }
 
     // 3. /snapshots/{snapshotId}
     match /snapshots/{snapshotId} {
-      allow get: if isSignedIn() && isValidId(snapshotId) && existing().ownerId == request.auth.uid;
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
+      allow get: if isValidId(snapshotId) && isPersonalWorkspace(existing().ownerId);
+      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow create: if isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isSignedIn() && isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
-        existing().ownerId == request.auth.uid &&
+      allow update: if isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
+        isPersonalWorkspace(existing().ownerId) &&
         incoming().ownerId == existing().ownerId &&
         incoming().date == existing().date &&
         incoming().createdAt == existing().createdAt &&
@@ -207,17 +207,17 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'prices', 'portfolio_total_value', 'timestamp', 'updatedAt'
         ]);
-      allow delete: if isSignedIn() && isValidId(snapshotId) && existing().ownerId == request.auth.uid;
+      allow delete: if isValidId(snapshotId) && isPersonalWorkspace(existing().ownerId);
     }
 
     // 4. /goals/{goalId}
     match /goals/{goalId} {
-      allow get: if isSignedIn() && isValidId(goalId) && existing().ownerId == request.auth.uid;
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(goalId) && isValidGoal(incoming()) &&
+      allow get: if isValidId(goalId) && isPersonalWorkspace(existing().ownerId);
+      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow create: if isValidId(goalId) && isValidGoal(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
-      allow update: if isSignedIn() && isValidId(goalId) && isValidGoal(incoming()) &&
-        existing().ownerId == request.auth.uid &&
+      allow update: if isValidId(goalId) && isValidGoal(incoming()) &&
+        isPersonalWorkspace(existing().ownerId) &&
         incoming().ownerId == existing().ownerId &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
@@ -227,23 +227,23 @@ service cloud.firestore {
           'current_required_sip', 'monthly_sip', 'current_target_date',
           'current_months_to_target', 'last_trailing_1y_return_pct', 'updatedAt'
         ]);
-      allow delete: if isSignedIn() && isValidId(goalId) && existing().ownerId == request.auth.uid;
+      allow delete: if isValidId(goalId) && isPersonalWorkspace(existing().ownerId);
     }
 
     // 5. /goal_recalcs/{recalcId}
     match /goal_recalcs/{recalcId} {
-      allow get: if isSignedIn() && isValidId(recalcId) && existing().ownerId == request.auth.uid;
-      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
+      allow get: if isValidId(recalcId) && isPersonalWorkspace(existing().ownerId);
+      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow create: if isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time &&
         (
           (exists(/databases/$(database)/documents/goals/$(incoming().goal_id)) &&
-           get(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId == request.auth.uid) ||
+           isPersonalWorkspace(get(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId)) ||
           (existsAfter(/databases/$(database)/documents/goals/$(incoming().goal_id)) &&
-           getAfter(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId == request.auth.uid)
+           isPersonalWorkspace(getAfter(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId))
         );
-      allow update: if isSignedIn() && isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
-        existing().ownerId == request.auth.uid &&
+      allow update: if isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
+        isPersonalWorkspace(existing().ownerId) &&
         incoming().ownerId == existing().ownerId &&
         incoming().id == existing().id &&
         incoming().goal_id == existing().goal_id &&
@@ -254,7 +254,7 @@ service cloud.firestore {
           'adjusted_monthly_sip', 'adjusted_target_date',
           'adjusted_months_remaining', 'note', 'updatedAt'
         ]);
-      allow delete: if isSignedIn() && isValidId(recalcId) && existing().ownerId == request.auth.uid;
+      allow delete: if isValidId(recalcId) && isPersonalWorkspace(existing().ownerId);
     }
   }
 }
