@@ -123,7 +123,7 @@ service cloud.firestore {
         (!('current_required_sip' in data) || (data.current_required_sip is number && data.current_required_sip >= 0)) &&
         (!('monthly_sip' in data) || (data.monthly_sip is number && data.monthly_sip >= 0)) &&
         (!('initial_target_date' in data) || (data.initial_target_date is string && data.initial_target_date.size() <= 16)) &&
-        (!('current_target_date' in data) || (data.current_target_date is string && data.current_target_date.size() <= 16)) &&
+        (!('current_target_date' in data) || (data.current_target_date is string && data.current_target_date is string && data.current_target_date.size() <= 16)) &&
         (!('current_months_to_target' in data) || (data.current_months_to_target is number && data.current_months_to_target >= 0)) &&
         data.last_trailing_1y_return_pct is number &&
         data.createdAt is timestamp &&
@@ -160,28 +160,28 @@ service cloud.firestore {
 
     // 1. /transactions/{transactionId}
     match /transactions/{transactionId} {
-      allow get: if isValidId(transactionId) && isPersonalWorkspace(existing().ownerId);
-      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow get: if isValidId(transactionId) && existing().ownerId == 'personal-portfolio';
+      allow list: if existing().ownerId == 'personal-portfolio';
       allow create: if isValidId(transactionId) && isValidTransaction(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(transactionId) && isValidTransaction(incoming()) &&
-        isPersonalWorkspace(existing().ownerId) &&
+        existing().ownerId == 'personal-portfolio' &&
         incoming().ownerId == existing().ownerId &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['quantity', 'price', 'date', 'name', 'updatedAt']);
-      allow delete: if isValidId(transactionId) && isPersonalWorkspace(existing().ownerId);
+      allow delete: if isValidId(transactionId) && existing().ownerId == 'personal-portfolio';
     }
 
     // 2. /instruments/{instrumentId}
     match /instruments/{instrumentId} {
-      allow get: if isValidId(instrumentId) && isPersonalWorkspace(existing().ownerId);
-      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow get: if isValidId(instrumentId) && existing().ownerId == 'personal-portfolio';
+      allow list: if existing().ownerId == 'personal-portfolio';
       allow create: if isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(instrumentId) && isValidInstrumentPrice(incoming()) &&
-        isPersonalWorkspace(existing().ownerId) &&
+        existing().ownerId == 'personal-portfolio' &&
         incoming().ownerId == existing().ownerId &&
         incoming().symbol == existing().symbol &&
         incoming().createdAt == existing().createdAt &&
@@ -189,17 +189,17 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'name', 'latest_price', 'previous_close', 'high_52w', 'low_52w', 'last_updated', 'source', 'updatedAt'
         ]);
-      allow delete: if isValidId(instrumentId) && isPersonalWorkspace(existing().ownerId);
+      allow delete: if isValidId(instrumentId) && existing().ownerId == 'personal-portfolio';
     }
 
     // 3. /snapshots/{snapshotId}
     match /snapshots/{snapshotId} {
-      allow get: if isValidId(snapshotId) && isPersonalWorkspace(existing().ownerId);
-      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow get: if isValidId(snapshotId) && existing().ownerId == 'personal-portfolio';
+      allow list: if existing().ownerId == 'personal-portfolio';
       allow create: if isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(snapshotId) && isValidDailySnapshot(incoming()) &&
-        isPersonalWorkspace(existing().ownerId) &&
+        existing().ownerId == 'personal-portfolio' &&
         incoming().ownerId == existing().ownerId &&
         incoming().date == existing().date &&
         incoming().createdAt == existing().createdAt &&
@@ -207,17 +207,17 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'prices', 'portfolio_total_value', 'timestamp', 'updatedAt'
         ]);
-      allow delete: if isValidId(snapshotId) && isPersonalWorkspace(existing().ownerId);
+      allow delete: if isValidId(snapshotId) && existing().ownerId == 'personal-portfolio';
     }
 
     // 4. /goals/{goalId}
     match /goals/{goalId} {
-      allow get: if isValidId(goalId) && isPersonalWorkspace(existing().ownerId);
-      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow get: if isValidId(goalId) && existing().ownerId == 'personal-portfolio';
+      allow list: if existing().ownerId == 'personal-portfolio';
       allow create: if isValidId(goalId) && isValidGoal(incoming()) &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(goalId) && isValidGoal(incoming()) &&
-        isPersonalWorkspace(existing().ownerId) &&
+        existing().ownerId == 'personal-portfolio' &&
         incoming().ownerId == existing().ownerId &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
@@ -227,23 +227,17 @@ service cloud.firestore {
           'current_required_sip', 'monthly_sip', 'current_target_date',
           'current_months_to_target', 'last_trailing_1y_return_pct', 'updatedAt'
         ]);
-      allow delete: if isValidId(goalId) && isPersonalWorkspace(existing().ownerId);
+      allow delete: if isValidId(goalId) && existing().ownerId == 'personal-portfolio';
     }
 
     // 5. /goal_recalcs/{recalcId}
     match /goal_recalcs/{recalcId} {
-      allow get: if isValidId(recalcId) && isPersonalWorkspace(existing().ownerId);
-      allow list: if isPersonalWorkspace(existing().ownerId);
+      allow get: if isValidId(recalcId) && existing().ownerId == 'personal-portfolio';
+      allow list: if existing().ownerId == 'personal-portfolio';
       allow create: if isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
-        incoming().createdAt == request.time && incoming().updatedAt == request.time &&
-        (
-          (exists(/databases/$(database)/documents/goals/$(incoming().goal_id)) &&
-           isPersonalWorkspace(get(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId)) ||
-          (existsAfter(/databases/$(database)/documents/goals/$(incoming().goal_id)) &&
-           isPersonalWorkspace(getAfter(/databases/$(database)/documents/goals/$(incoming().goal_id)).data.ownerId))
-        );
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(recalcId) && isValidGoalRecalc(incoming()) &&
-        isPersonalWorkspace(existing().ownerId) &&
+        existing().ownerId == 'personal-portfolio' &&
         incoming().ownerId == existing().ownerId &&
         incoming().id == existing().id &&
         incoming().goal_id == existing().goal_id &&
@@ -254,7 +248,7 @@ service cloud.firestore {
           'adjusted_monthly_sip', 'adjusted_target_date',
           'adjusted_months_remaining', 'note', 'updatedAt'
         ]);
-      allow delete: if isValidId(recalcId) && isPersonalWorkspace(existing().ownerId);
+      allow delete: if isValidId(recalcId) && existing().ownerId == 'personal-portfolio';
     }
   }
 }

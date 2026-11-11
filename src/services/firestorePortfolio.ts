@@ -399,9 +399,10 @@ export async function seedUserFirestoreIfEmpty(
     existingTxSnap = await getDocs(txQuery);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'transactions');
+    return;
   }
 
-  if (!existingTxSnap.empty) {
+  if (!existingTxSnap || !existingTxSnap.empty) {
     return; // Already seeded
   }
 

@@ -39,8 +39,8 @@ import { TransactionModal } from './components/TransactionModal';
 import { GoalsSection } from './components/GoalsSection';
 
 export default function App() {
-  const [data, setData] = useState<PortfolioDataResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [data, setData] = useState<PortfolioDataResponse>(() => getClientFallbackPortfolio());
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRunningDailyJob, setIsRunningDailyJob] = useState<boolean>(false);
   const [activeSection, setActiveSection] = useState<
     'all' | 'holdings' | 'periods' | 'goals' | 'history'
@@ -62,53 +62,31 @@ export default function App() {
   const [modalInitialSymbol, setModalInitialSymbol] = useState<string | undefined>(undefined);
   const [modalInitialTxType, setModalInitialTxType] = useState<TransactionType>('buy');
 
-  const fetchLocalPortfolio = async (): Promise<PortfolioDataResponse> => {
-    try {
-      const res = await fetch('/api/portfolio');
-      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
-        const json = (await res.json()) as PortfolioDataResponse;
-        setData(json);
-        return json;
-      }
-    } catch {
-      // Fallback to built-in client portfolio below
-    } finally {
-      setIsLoading(false);
-    }
-    const fallback = getClientFallbackPortfolio();
-    setData(fallback);
-    return fallback;
-  };
-
   // Automatically connect and sync with Firebase Firestore on startup across all devices
   useEffect(() => {
-    let unsubFirestore: (() => void) | undefined;
+    const initialFallback = getClientFallbackPortfolio();
 
-    fetchLocalPortfolio().then(async (initialFallback) => {
-      try {
-        await seedUserFirestoreIfEmpty(PERSONAL_PORTFOLIO_ID, initialFallback);
-      } catch (err) {
-        console.error('Error seeding Firestore:', err);
+    const unsubFirestore = subscribeToUserPortfolio(PERSONAL_PORTFOLIO_ID, (cloudState) => {
+      firestoreInstrumentsRef.current = cloudState.instruments;
+      if (cloudState.transactions.length > 0 || cloudState.goals.length > 0) {
+        const computed = buildPortfolioAnalyticsFromFirestore(
+          cloudState.transactions,
+          cloudState.instruments,
+          cloudState.snapshots,
+          cloudState.goals,
+          cloudState.recalcs
+        );
+        setData(computed);
       }
+      setIsLoading(false);
+    });
 
-      unsubFirestore = subscribeToUserPortfolio(PERSONAL_PORTFOLIO_ID, (cloudState) => {
-        firestoreInstrumentsRef.current = cloudState.instruments;
-        if (cloudState.transactions.length > 0 || cloudState.goals.length > 0) {
-          const computed = buildPortfolioAnalyticsFromFirestore(
-            cloudState.transactions,
-            cloudState.instruments,
-            cloudState.snapshots,
-            cloudState.goals,
-            cloudState.recalcs
-          );
-          setData(computed);
-        }
-        setIsLoading(false);
-      });
+    seedUserFirestoreIfEmpty(PERSONAL_PORTFOLIO_ID, initialFallback).catch((err) => {
+      console.error('Error seeding Firestore:', err);
     });
 
     return () => {
-      if (unsubFirestore) unsubFirestore();
+      unsubFirestore();
     };
   }, []);
 
