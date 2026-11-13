@@ -1,6 +1,44 @@
 import { initializeApp } from 'firebase/app';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+
+// Use import.meta.glob so Vite never fails the build on Vercel/GitHub if firebase-applet-config.json is excluded on export
+const appletConfigModules = import.meta.glob('../firebase-applet-config.json', {
+  eager: true,
+  import: 'default'
+}) as Record<string, Record<string, string>>;
+
+const loadedAppletConfig = appletConfigModules['../firebase-applet-config.json'];
+
+const firebaseConfig = {
+  projectId:
+    loadedAppletConfig?.projectId ||
+    import.meta.env.VITE_FIREBASE_PROJECT_ID ||
+    'gen-lang-client-0437386035',
+  appId:
+    loadedAppletConfig?.appId ||
+    import.meta.env.VITE_FIREBASE_APP_ID ||
+    '1:532490339410:web:9d7bba10343207d6e88b8b',
+  apiKey:
+    loadedAppletConfig?.apiKey ||
+    import.meta.env.VITE_FIREBASE_API_KEY ||
+    'AIzaSyAC0O-NxbyO7tIvjL6O-6h6fMPIOEssTkk',
+  authDomain:
+    loadedAppletConfig?.authDomain ||
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN ||
+    'gen-lang-client-0437386035.firebaseapp.com',
+  firestoreDatabaseId:
+    loadedAppletConfig?.firestoreDatabaseId ||
+    import.meta.env.VITE_FIREBASE_DATABASE_ID ||
+    'ai-studio-meridianportfoli-7af0c6bc-62c2-487e-bbed-95c4aefdba2d',
+  storageBucket:
+    loadedAppletConfig?.storageBucket ||
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
+    'gen-lang-client-0437386035.firebasestorage.app',
+  messagingSenderId:
+    loadedAppletConfig?.messagingSenderId ||
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ||
+    '532490339410'
+};
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
